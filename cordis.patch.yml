@@ -1,0 +1,9 @@
+# One Profile layer: mount the decode-rejection translator next to the offload
+# executor it feeds. Composes with any profile that runs the agent loop against a
+# route which may reject a decodable image. The plugin needs no services, so its
+# position in the list does not matter — it prepends itself to the
+# `agent/request-error` waterfall, which is what the executor requires.
+
+- insert:
+    - id: image-offload-fallback
+      name: '@argszero/cordis-plugin-image-offload-fallback'
