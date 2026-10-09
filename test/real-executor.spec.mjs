@@ -12,7 +12,24 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import * as imageOffload from '@deepseek-ai/dsh-compaction-image-offload'
-import { appendedTranslator, appliedContext, dispatchRequestError, errorPayload, fakeSession, imageMessage } from './helpers.mjs'
+import { imageOffloadProjection } from '@deepseek-ai/dsh-compaction-image-offload/projection'
+import {
+  appendedTranslator,
+  appliedContext,
+  dispatchRequestError,
+  errorPayload,
+  fakeAttachments,
+  fakeSession,
+  imageMessage,
+  imageRef,
+  translatorPlugin,
+} from './helpers.mjs'
+
+/** The failure the DeepSeek Messages adapter publishes for a route it could not reach. */
+const TRANSPORT_FAILURE = Object.freeze({ message: 'DeepSeek Messages transport failed', code: 'TRANSPORT' })
+
+/** `attachmentId` for occurrence `n` of `imageMessage`'s default fixture. */
+const id = n => imageRef(n).attachmentId
 
 const OFFENDING_SEQ = 5
 
@@ -93,6 +110,85 @@ describe('published executor', () => {
     await ctx.plugin(appendedTranslator())
 
     const action = await dispatchRequestError(ctx, errorPayload({ agent: { session } }))
+
+    assert.equal(action, undefined)
+    assert.deepEqual(session.appended, [])
+  })
+})
+
+/**
+ * The same context, with the published executor's *registration* recorded instead of
+ * discarded, so the plugin's "is an interpreter mounted" question is answered by the
+ * shipped plugin rather than by a stand-in.
+ * @param options.missing - occurrence numbers whose attachment object is gone.
+ */
+async function mountedScenario({ images, missing = [], offloaded = [] }) {
+  const session = fakeSession([
+    { seq: OFFENDING_SEQ, type: 'user/message', message: imageMessage({ images, offloaded }) },
+  ])
+  const registrations = []
+  const ctx = new Context()
+  ctx.provide('sessions', {
+    registerMessageProjection(projection) {
+      registrations.push(projection)
+      return async () => {}
+    },
+    get messageProjections() {
+      return registrations
+    },
+  })
+  ctx.provide('agents', {})
+  ctx.provide('attachments', fakeAttachments({ missing: missing.map(id) }))
+  await ctx.plugin(imageOffload)
+  await ctx.plugin(translatorPlugin)
+  return { ctx, session, registrations }
+}
+
+describe('published executor with the missing-object probe', () => {
+  it('publishes the projection type the probe guards on', async () => {
+    // The guard is not a guess: this is the shipped registration it looks for.
+    const { registrations } = await mountedScenario({ images: 1 })
+    assert.deepEqual(registrations.map(projection => projection.type), ['image/offload'])
+  })
+
+  it('recovers an object whose absence only the store knows about', async () => {
+    // No wording in the failure points at an image — only the probe does.
+    const { ctx, session } = await mountedScenario({ images: 3, missing: [3] })
+    const payload = errorPayload({ agent: { session }, failure: TRANSPORT_FAILURE })
+    const action = await dispatchRequestError(ctx, payload)
+
+    assert.deepEqual(action, { kind: 'retry' })
+    assert.deepEqual(session.appended, [
+      { type: 'image/offload', data: { targets: [{ seq: OFFENDING_SEQ, imageIndexes: [2] }] } },
+    ])
+    // The failure keeps the route's own words: this is a durable repair, not a re-marking.
+    assert.equal(payload.failure.code, TRANSPORT_FAILURE.code)
+    assert.equal(payload.failure.message, TRANSPORT_FAILURE.message)
+  })
+
+  it('hands the shipped projection a selection it accepts', async () => {
+    const { ctx, session } = await mountedScenario({ images: 3, missing: [2] })
+    await dispatchRequestError(ctx, errorPayload({ agent: { session }, failure: TRANSPORT_FAILURE }))
+
+    const [selection] = session.appended
+    const message = imageMessage({ images: 3 })
+    const projected = imageOffloadProjection.project(selection, {
+      baseSeq: OFFENDING_SEQ,
+      nodes: [OFFENDING_SEQ],
+      events: [{ seq: OFFENDING_SEQ, type: 'user/message', data: message }],
+      messages: new Map(),
+    })
+
+    // Applying the decision to the message it was written for marks exactly the lost
+    // occurrence and leaves the two live ones alone, which is the whole recovery.
+    const blocks = projected.get(OFFENDING_SEQ).content
+    assert.deepEqual(blocks.filter(block => block.type === 'image').map(block => block.offloaded === true), [false, true, false])
+  })
+
+  it('never acts on the identical wording when the objects are all present', async () => {
+    // The #9266 arm: a TLS-inspection proxy publishes this exact sentence and code.
+    const { ctx, session } = await mountedScenario({ images: 2, missing: [] })
+    const action = await dispatchRequestError(ctx, errorPayload({ agent: { session }, failure: TRANSPORT_FAILURE }))
 
     assert.equal(action, undefined)
     assert.deepEqual(session.appended, [])

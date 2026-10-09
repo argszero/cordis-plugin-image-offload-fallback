@@ -1,7 +1,7 @@
 {
   "name": "@argszero/cordis-plugin-image-offload-fallback",
-  "version": "0.1.0",
-  "description": "Recover a session wedged by an image the route cannot decode: translate the rejection into the harness's existing IMAGE_OFFLOAD_REQUIRED recovery",
+  "version": "0.2.0",
+  "description": "Recover a session wedged by an image its route cannot serve: translate a decode rejection, or probe for an attachment object that is gone, into the harness's existing image-offload recovery",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -40,6 +40,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.spec.mjs",
+    "test:arms": "node scripts/inject-defects.mjs",
     "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
@@ -48,8 +49,12 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.6-alpha.2",
+    "@deepseek-ai/dsh-attachment": "0.1.6-alpha.2",
+    "@deepseek-ai/dsh-attachment-local": "^0.1.6-alpha.2",
     "@deepseek-ai/dsh-compaction-image-offload": "0.1.6-alpha.2",
     "@deepseek-ai/dsh-llm": "0.1.6-alpha.2",
+    "@deepseek-ai/dsh-session": "0.1.6-alpha.2",
+    "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
 }

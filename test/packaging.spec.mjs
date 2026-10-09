@@ -30,6 +30,18 @@ function walk(dir) {
 }
 
 /**
+ * The package a bare specifier belongs to: a subpath import (`pkg/projection`) is
+ * satisfied by the declaration of `pkg`, so comparing package names is what makes this
+ * check describe the tarball rather than the spelling of an import.
+ * @param specifier - a bare module specifier.
+ * @returns the package name, scope included.
+ */
+function packageOf(specifier) {
+  const [first, second] = specifier.split('/')
+  return first.startsWith('@') ? `${first}/${second}` : first
+}
+
+/**
  * Bare specifiers in one file, split by whether the import survives type erasure.
  * @param file - source or artifact path.
  * @returns runtime and type-only package names.
@@ -42,7 +54,7 @@ function specifiersOf(file) {
   for (const match of text.matchAll(pattern)) {
     const [, isTypeOnly, specifier] = match
     if (specifier.startsWith('.') || specifier.startsWith('node:') || specifier.startsWith('data:')) continue
-    ;(isTypeOnly === undefined ? runtime : typeOnly).add(specifier)
+    ;(isTypeOnly === undefined ? runtime : typeOnly).add(packageOf(specifier))
   }
   return { runtime, typeOnly }
 }

@@ -143,18 +143,89 @@ export function fakeSession(entries) {
   }
 }
 
-/** One user message holding `images` image blocks followed by a text block. */
-export function imageMessage({ images, offloaded = [], text = 'what is this?' }) {
+/** One durable image reference, shaped as the attachment service publishes it. */
+export function imageRef(id) {
+  return {
+    attachmentId: `sha256:${String(id).padStart(64, '0')}`,
+    mediaType: 'image/webp',
+    bytes: 1024,
+    width: 800,
+    height: 600,
+  }
+}
+
+/**
+ * One user message holding `images` image blocks followed by a text block.
+ * @param options.attachments - attachment id per occurrence; defaults to that occurrence's index.
+ */
+export function imageMessage({ images, offloaded = [], text = 'what is this?', attachments = [] }) {
   return {
     role: 'user',
     content: [
       ...Array.from({ length: images }, (_, index) => ({
         type: 'image',
-        mediaType: 'image/webp',
+        attachment: imageRef(attachments[index] ?? index + 1),
         ...(offloaded.includes(index) ? { offloaded: true } : {}),
       })),
       { type: 'text', text },
     ],
+  }
+}
+
+/** The store's own failure shape, without importing the harness class the tarball may not have. */
+export class FakeAttachmentError extends Error {
+  constructor(message, code) {
+    super(message)
+    this.code = code
+    this.name = 'AttachmentError'
+  }
+}
+
+/**
+ * A stand-in attachment service: the two members the probe reads.
+ * @param options.missing - attachment ids whose read throws `ATTACHMENT_NOT_FOUND`.
+ * @param options.failing - `{ code, ids }` pairs: ids whose read throws that code instead.
+ * @param options.signal - a signal to abort on read, emulating a cancelled step.
+ */
+export function fakeAttachments({ missing = [], failing = {}, abortOnRead = undefined } = {}) {
+  const missingIds = new Set(missing.map(id => String(id)))
+  const reads = []
+  return {
+    reads,
+    async readImage(ref, signal) {
+      reads.push(String(ref.attachmentId))
+      signal?.throwIfAborted()
+      if (abortOnRead !== undefined) throw abortOnRead
+      const id = String(ref.attachmentId)
+      for (const [code, ids] of Object.entries(failing)) {
+        if (ids.map(String).includes(id)) throw new FakeAttachmentError(`attachment ${code}`, code)
+      }
+      if (missingIds.has(id)) throw new FakeAttachmentError('Attachment object is missing.', 'ATTACHMENT_NOT_FOUND')
+      return { ref, data: new Uint8Array(0) }
+    },
+    isAttachmentError(error) {
+      return error instanceof FakeAttachmentError
+    },
+  }
+}
+
+/**
+ * A stand-in for the session store's projection registry: it records what the mounted
+ * plugins register and exposes it the way the real store does, so a plugin that asks
+ * whether the offload interpreter is present gets the true answer.
+ * @param initial - projections already registered before the plugins mount.
+ */
+export function fakeSessions(initial = []) {
+  const projections = [...initial]
+  return {
+    projections,
+    registerMessageProjection(projection) {
+      projections.push(projection)
+      return async () => {}
+    },
+    get messageProjections() {
+      return projections
+    },
   }
 }
 
