@@ -43,8 +43,10 @@ outside the core packages.
 ## Install
 
 ```sh
-npm install @argszero/cordis-plugin-image-offload-fallback
+dsh plugin --profile <profile> add github:argszero/cordis-plugin-image-offload-fallback
 ```
+
+The git spec installs the tree this README describes; `npm install` on its own never attaches a plugin to a profile — `dsh plugin add` is what writes the row that makes it load.
 
 Then mount it, e.g. in a profile overlay:
 
